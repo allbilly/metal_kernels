@@ -1,0 +1,49 @@
+# dispatch list only: the .gputrace has no per-kernel GPU time.
+# for real %: xctrace Shader Timeline (§1.5).
+43 kernels:
+
+Name                                                          Pipeline State      Dispatches  Debug Groups / Labels
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+2BB58ECB-F448-32CF-9CA5-8C818E9DCEA1                          0x7bf6b05ec0        1
+2CEFCF10-7DDA-322A-BFDA-289918D22602                          0x7bf6aa8ec0        1
+7C30DE63-4860-3A70-B714-733CCF2BC271                          0x7bf6aa9280        1
+9CA8BB37-32C9-3B53-8418-E1C19121528F                          0x7bf5229d00        1
+CFA6B98F-6656-3478-8C88-92DBA7EBCAB3                          0x7bf6aa9200        1
+CV2ISigmoidADV2IBroadcastACEV2IBroadcastCAFV2IMultiplyDEG...  0x7bf6aa94c0        1
+Cf4IAsTypeADf4ISigmoidCEf4IBroadcastCDFf4IBroadcastDCGf4I...  0x7bf6aa9280        1
+Ef4IExpAFf4INegativeEGV2IBroadcastBCHV2IBroadcastCBIV2IAd...  0x7bf6aa8ec0        1
+Ef4IExpAFf4INegativeEGV2IBroadcastBCHV2IBroadcastCBIV2IAd...  0x7bf6aa8ec0        1
+FFC374CE-5D7C-30F0-8D5E-50C8BC973B05                          0x7bf6aa94c0        1
+arangeint32                                                   0x7bf5229d00        1
+argmax_bfloat16                                               0x7bf5229d00        1
+block_softmax_precise_bfloat16                                0x7bf5229d00        1
+custom_kernel_gated_delta_step_packed_btree__bfloat16_t_f...  0x7bf6aa9200        1
+custom_kernel_kk_fused_conv1d_silu_CD6144_KS4__bfloat16_t...  0x7bf6b05ec0        1
+depthwise_conv_1d_bfloat16                                    0x7bf5229d00        1
+g1_copybfloat16bfloat16                                       0x7bf5229d00        1
+g2_GreaterEqualint32                                          0x7bf5229d00        1
+g2_Selectbfloat16                                             0x7bf5229d00        1
+g2_copybfloat16bfloat16                                       0x7bf5229d00        1
+g3_copybfloat16bfloat16                                       0x7bf5229d00        1
+gemv_bfloat16_bm4_bn1_sm1_sn32_tm4_tn4_nc0_axpby0             0x7bf5229d00        1
+gemv_bfloat16_bm8_bn1_sm1_sn32_tm4_tn4_nc0_axpby0             0x7bf5229d00        1
+gg1_copybfloat16bfloat16                                      0x7bf5229d00        1
+gg2_copybfloat16bfloat16                                      0x7bf5229d00        1
+gg3_copybfloat16bfloat16                                      0x7bf5229d00        1
+looped_logsumexp_bfloat16                                     0x7bf5229d00        1
+rmsbfloat16                                                   0x7bf5229d00        1
+s_copybfloat16bfloat16                                        0x7bf5229d00        1
+sn_copybfloat16bfloat16                                       0x7bf5229d00        1
+sn_copyfloat32float32                                         0x7bf5229d00        1
+steel_gemm_splitk_accum_bfloat16_float32                      0x7bf5229d00        1
+steel_gemm_splitk_nt_bfloat16_float32_bm32_bn16_bk16_wm2_...  0x7bf5229d00        1
+svn_Multiplybfloat16                                          0x7bf5229d00        1
+v_Sigmoidbfloat16bfloat16                                     0x7bf5229d00        1
+vn_Sigmoidbfloat16bfloat16                                    0x7bf5229d00        1
+vs_Multiplybfloat16                                           0x7bf5229d00        1
+vsn_Multiplybfloat16                                          0x7bf5229d00        1
+vsn_Subtractbfloat16                                          0x7bf5229d00        1
+vv_Addbfloat16                                                0x7bf5229d00        1
+vv_Multiplybfloat16                                           0x7bf5229d00        1
+vvn_Addbfloat16                                               0x7bf5229d00        1
+vvn_Multiplybfloat16                                          0x7bf5229d00        1

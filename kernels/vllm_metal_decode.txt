@@ -1,0 +1,74 @@
+# one command buffer capture (-c 1), short prompt
+# dispatch list only: no per-kernel GPU time in the capture
+68 kernels:
+
+Name                                                          Pipeline State      Dispatches  Debug Groups / Labels
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+13DD5AE9-8DA3-3503-9A24-422C15EEB746                          0x77ca78b640        1
+355CC944-93C4-3F3D-951B-87E60E958BFB                          0x77ca78b3c0        1
+39B9C507-D8D5-38D1-939A-70E9C0AD09FE                          0x77ca4f7cc0        1
+59974B5C-E35C-3DA4-941E-677214B74B3D                          0x77ca4f7dc0        1
+626EF5BE-C323-38E8-A408-86EADB314CB9                          0x77ca78bb40        1
+8445C282-C722-31A9-BF2C-C9E97E887B18                          0x77ca4f6500        1
+86AA4DBD-17EC-3BFA-82F7-CE0CE65C544D                          0x77cc7a5cc0        1
+90901931-7A42-3DDF-9BE5-B1781158EDAE                          0x77cab98880        1
+A2A30DF7-4E90-3B5A-9CCB-CCAD0C87BE9A                          0x77ca4f6540        1
+BV2ISigmoidACV2IBroadcastABDV2IBroadcastBAEV2OMultiplyCD_...  0x77ca78b640        1
+C1BFD1FC-984C-3BD3-8761-ABF6813D3903                          0x77cab98140        1
+C9C9A651-B61C-3421-B5FC-6EDD68DDE71E                          0x77cab98a00        1
+CV2ISigmoidADV2IBroadcastACEV2IBroadcastCAFV2IMultiplyDEG...  0x77ca4f7cc0        1
+Cf4IAsTypeADf4IBroadcastBEf4OMultiplyCD_VV_i4f4_111603181...  0x77cab98880        1
+Cf4IAsTypeADf4ISigmoidCEf4IBroadcastCDFf4IBroadcastDCGf4I...  0x77ca4f7dc0        1
+EV2IBroadcastBFV2IMultiplyAEGV2IBroadcastDHV2IMultiplyCGI...  0x77cab98300        1
+Ef4IExpAFf4INegativeEGV2IBroadcastBCHV2IBroadcastCBIV2IAd...  0x77ca78bb40        1
+Ef4IExpAFf4INegativeEGV2IBroadcastBCHV2IBroadcastCBIV2IAd...  0x77ca78bb40        1
+F076CDD5-119C-35AF-AFF7-9ACDFD140BAA                          0x77cab98300        1
+arangeint32                                                   0x77cc7a5cc0        1
+argmax_bfloat16                                               0x77cc7a5cc0        1
+block_softmax_precise_bfloat16                                0x77cc7a5cc0        1
+depthwise_conv_1d_bfloat16                                    0x77cc7a5cc0        1
+g2_GreaterEqualint32                                          0x77cc7a5cc0        1
+g2_Selectbfloat16                                             0x77cc7a5cc0        1
+g2_copybfloat16bfloat16                                       0x77cc7a5cc0        1
+g3_copybfloat16bfloat16                                       0x77cc7a5cc0        1
+gather_frontbfloat16_int32_int_2                              0x77ca78b3c0        1
+gather_frontbfloat16_uint32_int_2                             0x77cab98140        1
+gatherint32int32_1_1_int                                      0x77cab98a00        1
+gdn_linear_attention_float                                    0x77ca4f6500        1
+gdn_state_scatter_rows_vec4_bfloat16_t                        0x77ca4f6500        1
+gdn_state_scatter_rows_vec4_float                             0x77ca4f6500        1
+gdn_state_scatter_rows_vec4_uchar                             0x77ca4f6500        1
+gemv_bfloat16_bm1_bn8_sm1_sn32_tm4_tn4_nc0_axpby0             0x77cc7a5cc0        1
+gemv_bfloat16_bm4_bn1_sm1_sn32_tm4_tn4_nc0_axpby0             0x77cc7a5cc0        1
+gemv_bfloat16_bm8_bn1_sm1_sn32_tm4_tn4_nc0_axpby0             0x77cc7a5cc0        1
+gg1_copybfloat16bfloat16                                      0x77cc7a5cc0        1
+gg1_copyfloat32float32                                        0x77cc7a5cc0        1
+gg2_copybfloat16bfloat16                                      0x77cc7a5cc0        1
+gn1_Negativebfloat16bfloat16                                  0x77cc7a5cc0        1
+rmsbfloat16                                                   0x77cc7a5cc0        1
+s_copybfloat16bfloat16                                        0x77cc7a5cc0        1
+s_copyint32int32                                              0x77cc7a5cc0        1
+sn_copyfloat32float32                                         0x77cc7a5cc0        1
+ss_Multiplyint32                                              0x77cc7a5cc0        1
+steel_gemm_splitk_accum_bfloat16_float32                      0x77cc7a5cc0        1
+steel_gemm_splitk_nt_bfloat16_float32_bm16_bn16_bk16_wm2_...  0x77cc7a5cc0        1
+steel_gemm_splitk_nt_bfloat16_float32_bm16_bn32_bk16_wm2_...  0x77cc7a5cc0        1
+sv_Addint32                                                   0x77cc7a5cc0        1
+sv_Dividefloat32                                              0x77cc7a5cc0        1
+sv_Powerfloat32                                               0x77cc7a5cc0        1
+svn_Multiplybfloat16                                          0x77cc7a5cc0        1
+v_Cosfloat32float32                                           0x77cc7a5cc0        1
+v_Sigmoidbfloat16bfloat16                                     0x77cc7a5cc0        1
+v_Sinfloat32float32                                           0x77cc7a5cc0        1
+v_copybfloat16float32                                         0x77cc7a5cc0        1
+v_copyfloat32bfloat16                                         0x77cc7a5cc0        1
+v_copyint32float32                                            0x77cc7a5cc0        1
+vn_Sigmoidbfloat16bfloat16                                    0x77cc7a5cc0        1
+vs_Dividefloat32                                              0x77cc7a5cc0        1
+vs_Multiplybfloat16                                           0x77cc7a5cc0        1
+vs_Multiplyfloat32                                            0x77cc7a5cc0        1
+vsn_Multiplybfloat16                                          0x77cc7a5cc0        1
+vv_Addbfloat16                                                0x77cc7a5cc0        1
+vv_Multiplybfloat16                                           0x77cc7a5cc0        1
+vvn_Addbfloat16                                               0x77cc7a5cc0        1
+vvn_Multiplybfloat16                                          0x77cc7a5cc0        1

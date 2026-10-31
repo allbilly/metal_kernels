@@ -1,0 +1,10 @@
+oMLX ANE, Qwen3.5-0.8B-4bit (4-bit, not comparable to BF16), 16 tokens, temp 0
+run  gen_tok/s  ttft_s
+1    102.73      0.07
+2    101.65      0.06
+3    101.68      0.06
+4    100.89      0.06
+5    100.27      0.06
+avg  101.44     0.062
+
+oMLX 4-bit without ANE: 95.46 tok/s, ttft 0.076s

@@ -1,0 +1,25 @@
+# dispatch list only: the .gputrace has no per-kernel GPU time.
+# for real %: xctrace Shader Timeline (§1.5).
+19 kernels:
+
+Name                            Pipeline State      Dispatches  Debug Groups / Labels
+──────────────────────────────────────────────────────────────────────────────────────────────
+MUL_MAT                         0x7834d39a40        183
+RMS_NORM                        0x7834d39a40        113
+ADD                             0x7834d39a40        64
+MUL                             0x7834d39a40        42
+GET_ROWS                        0x7834d39a40        36
+SCALE                           0x7834d39a40        36
+SIGMOID                         0x7834d39a40        24
+SWIGLU                          0x7834d39a40        23
+CONCAT                          0x7834d39a40        18
+CPY                             0x7834d39a40        18
+GATED_DELTA_NET                 0x7834d39a40        18
+SILU                            0x7834d39a40        18
+SOFTPLUS                        0x7834d39a40        18
+SSM_CONV                        0x7834d39a40        18
+FLASH_ATTN_EXT                  0x7834d39cc0        12
+ROPE                            0x7834d39cc0        12
+SET_ROWS                        0x7834d39a40        12
+CONT                            0x7834d39cc0        6
+DUP                             0x7834d39a40        0

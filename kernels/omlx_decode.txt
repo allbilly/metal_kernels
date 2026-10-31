@@ -1,0 +1,54 @@
+# one command buffer capture (-c 1), short prompt
+# dispatch list only: no per-kernel GPU time in the capture
+48 kernels:
+
+Name                                                          Pipeline State      Dispatches  Debug Groups / Labels
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+9CA8BB37-32C9-3B53-8418-E1C19121528F                          0x7994fe8b00        1
+A09BEBAA-CFFF-33F1-A803-C5DCF52D10E4                          0x7992cfabc0        1
+arangeint32                                                   0x7994fe8b00        1
+argmax_bfloat16                                               0x7994fe8b00        1
+depthwise_conv_1d_bfloat16                                    0x7994fe8b00        1
+g1_copybfloat16bfloat16                                       0x7994fe8b00        1
+g1_copyint32int32                                             0x7994fe8b00        1
+g2_copybfloat16bfloat16                                       0x7994fe8b00        1
+g2_copyint32int32                                             0x7994fe8b00        1
+g3_copybfloat16bfloat16                                       0x7994fe8b00        1
+gather_frontint32_uint32_int_1                                0x7992cfabc0        1
+gemv_bfloat16_bm1_bn8_sm1_sn32_tm4_tn4_nc0_axpby0             0x7994fe8b00        1
+gemv_bfloat16_bm4_bn1_sm1_sn32_tm4_tn4_nc0_axpby0             0x7994fe8b00        1
+gemv_bfloat16_bm8_bn1_sm1_sn32_tm4_tn4_nc0_axpby0             0x7994fe8b00        1
+gg1_copybfloat16bfloat16                                      0x7994fe8b00        1
+gg1_copyuint32uint32                                          0x7994fe8b00        1
+gg2_copybfloat16bfloat16                                      0x7994fe8b00        1
+gg3_copybfloat16bfloat16                                      0x7994fe8b00        1
+looped_logsumexp_bfloat16                                     0x7994fe8b00        1
+rbitsc                                                        0x7994fe8b00        1
+rmsbfloat16                                                   0x7994fe8b00        1
+s_copyfloat32float32                                          0x7994fe8b00        1
+s_copyint64int64                                              0x7994fe8b00        1
+sn_copybfloat16bfloat16                                       0x7994fe8b00        1
+ss_Addfloat32                                                 0x7994fe8b00        1
+ss_Addint32                                                   0x7994fe8b00        1
+ss_Subtractfloat32                                            0x7994fe8b00        1
+steel_gemm_splitk_accum_bfloat16_float32                      0x7994fe8b00        1
+steel_gemm_splitk_nt_bfloat16_float32_bm16_bn16_bk16_wm2_...  0x7994fe8b00        1
+steel_gemm_splitk_nt_bfloat16_float32_bm16_bn32_bk16_wm2_...  0x7994fe8b00        1
+sv_Addint32                                                   0x7994fe8b00        1
+sv_Dividefloat32                                              0x7994fe8b00        1
+sv_Powerfloat32                                               0x7994fe8b00        1
+svn_Multiplyfloat32                                           0x7994fe8b00        1
+v_Sigmoidbfloat16bfloat16                                     0x7994fe8b00        1
+v_copyfloat32int32                                            0x7994fe8b00        1
+v_copyint32float32                                            0x7994fe8b00        1
+vn_ErfInvfloat32float32                                       0x7994fe8b00        1
+vn_copyfloat32float16                                         0x7994fe8b00        1
+vn_copyuint32float32                                          0x7994fe8b00        1
+vs_Dividefloat32                                              0x7994fe8b00        1
+vs_Multiplybfloat16                                           0x7994fe8b00        1
+vsn_Addfloat32                                                0x7994fe8b00        1
+vsn_Dividefloat32                                             0x7994fe8b00        1
+vsn_Minimumfloat32                                            0x7994fe8b00        1
+vsn_Subtractbfloat16                                          0x7994fe8b00        1
+vv_Addbfloat16                                                0x7994fe8b00        1
+vv_Multiplybfloat16                                           0x7994fe8b00        1
