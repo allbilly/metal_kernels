@@ -117,3 +117,102 @@ If we can make GEMM faster or remove other work,
 
 1. The 0.656 ms is the measured isolated GEMM mix and 0.801 ms is inferred from the measured prefill;
 2. the 0.381 ms row is modelled, assuming Apple's 2.62 TFLOP/s fp32 rating (8 cores × 16 execution units × 8 fp32 lanes × 2 (FMA) × 1.278 GHz), not a verified bf16 maximum. `scripts/model_prefill_max.py` applies that peak to the eight Qwen GEMM shapes at M=2048 with tile padding and wave occupancy; padding costs 0.12% of FLOPs, and at 8-32 concurrent tiles every shape fills the machine, so the wave term is zero; only an implausible 256-tile capacity would cost another 1%.
+
+## 1.4 mlx_lm qwen3.5 0.8b decode
+
+```bash
+python benchmarks/decode_trace.py > /tmp/decode.log 2>&1 &
+PID=$!
+while ! grep -q READY /tmp/decode.log; do sleep 1; done
+scripts/profile.sh --attach "$PID" --seconds 20 --kernels --out traces/timeline-baseline
+```
+
+| kernel             | intervals % | ms/token | what it does                                        |
+|--------------------|------------:|---------:|-----------------------------------------------------|
+| `gemv`             |        97.5 |    26.41 | BF16 GEMV for decode linear layers                  |
+| ↳ `bm8`            |        49.5 |    13.41 | 8 simdgroup rows per threadgroup                    |
+| ↳ `bm4`            |        48.0 |    13.00 | 4 simdgroup rows                                    |
+| ↳ `bm1`            |         0.0 |     0.00 | 1 simdgroup row (small matrices)                    |
+| `sdpa_vector`      |         1.6 |     0.43 | single-token attention over KV cache (head dim 256) |
+| rest               |         0.7 |     0.18 | small kernels: argmax, copies, elementwise          |
+| `gated_delta_step` |         0.1 |     0.04 | one step of the gated delta rule (linear attention) |
+| `rms`              |         0.1 |     0.02 | RMSNorm                                             |
+| `sigmoid+mul`      |         0.1 |     0.02 | fused sigmoid gate × value                          |
+| host/queue gap     |           — |     3.66 | —                                                   |
+| **total**          |       100.0 |    30.75 |                                                     |
+
+1. Trace session: 32.5 tok/s (30.75 ms/token), 64 decode tokens.
+2. The trace prompt was the first 5,465 bytes of the 10k file; the paired A/B is 36.9 vs 35.4 tok/s (§1.2).
+
+| metric   | paired A/B | measured SOL |
+|----------|-----------:|-------------:|
+| tok/s    |       36.9 |         38.7 |
+| ms/token |      27.09 |        25.86 |
+| GB/s     |       55.6 |         58.2 |
+| % SOL    |        95% |         100% |
+
+1. Measured SOL = 1.505 GB/token ÷ 58.2 GB/s = 25.86 ms/token → 38.7 tok/s; 1.505 GB is the 0.752B-param text model at 2 bytes.
+2. 58.2 GB/s is the read rate: the 1.5 GB GEMV chain (`benchmarks/gemv_chain.py`) measures 56.8-58.2 GB/s and a 512 MB read (`scripts/mem_bw.py`) 53.6; 58.2 is the best measured (85% of the 68.3 GB/s nominal).
+
+## 1.5 omlx qwen3.5 0.8b prefill
+
+```bash
+OMLX=/Applications/oMLX.app/Contents/MacOS/omlx-cli
+$OMLX serve --port 8005 --headless &
+PID=$!
+for i in {1..120}; do curl -sf -H 'Authorization: Bearer 1234' -o /dev/null http://127.0.0.1:8005/v1/models && break; sleep 1; done
+curl -s -H 'Authorization: Bearer 1234' -H 'Content-Type: application/json' \
+  http://127.0.0.1:8005/v1/completions \
+  --data-binary "$(jq -n --arg p "$(cat benchmark_prompt_10k.txt)" '{model:"mlx-community--Qwen3.5-0.8B-bf16",prompt:$p,max_tokens:1,temperature:0}')" \
+  | jq -r '.usage.prompt_tokens_per_second'
+kill $PID
+```
+
+| kernel                  | intervals % | what it does                          |
+|-------------------------|------------:|---------------------------------------|
+| `steel_gemm`            |        76.6 | q/k/v/o and MLP GEMM                  |
+| ↳ `nt bm64_bn32_bk32`   |        63.9 | x @ w.T, 64×32: q/k/v/o, MLP up/gate  |
+| ↳ `nn bm64_bn64_bk16`   |        12.7 | x @ w, 64×64 tile                     |
+| `gdn`                   |         8.4 | GDN mixer                             |
+| `looped_softmax`        |         4.0 | attention softmax                     |
+| `sigmoid+mul`           |         2.2 | fused gating                          |
+| `select`                |         2.1 | attention mask/index                  |
+| copies                  |         1.7 | layout/cast copies                    |
+| `gemv`                  |         1.3 | one decode token                      |
+| `depthwise_conv`        |         0.8 | GDN conv                              |
+| `rms`                   |         0.7 | RMSNorm                               |
+| `fa256`                 |         0.7 | attention                             |
+| rest                    |         1.5 | sdpa, RoPE, elementwise               |
+| **total**               |       100.0 | rounded                               |
+
+1. Kernel mix from a 0.7.4.dev1 prefill trace at 10,000 tokens.
+2. `steel_gemm` is 76.6% of kernel time, 1.19 TFLOP/s against the 1.517 isolated mix.
+
+If we can make GEMM faster or remove other work,
+
+| Scenario                       |      GEMM time | GEMM TFLOP/s | Other work |     Prefill speed |
+|--------------------------------|---------------:|-------------:|-----------:|------------------:|
+| GEMM + other work (measured)   |       0.837 ms |         1.19 |   0.259 ms |         912 tok/s |
+| Faster GEMM + other work       |       0.656 ms |         1.52 |   0.259 ms |       1,093 tok/s |
+| Modelled hardware + other work |       0.381 ms |         2.62 |   0.259 ms |       1,562 tok/s |
+| Modelled hardware only         |       0.381 ms |         2.62 |          0 |       2,627 tok/s |
+
+1. The 0.656 ms is the isolated GEMM mix from §1.3; 0.837 ms and 0.259 ms are inferred from the 912 tok/s prefill.
+2. The 0.381 ms row is modelled from Apple's 2.62 TFLOP/s fp32 rating, as in §1.3.
+
+### 1.5.1 optimize omlx prefill
+
+| Scenario                       |      GEMM time | GEMM TFLOP/s | Other work |     Prefill speed |
+|--------------------------------|---------------:|-------------:|-----------:|------------------:|
+| mlx_lm (ref, §1.3)             |       0.801 ms |         1.24 |   0.248 ms |         954 tok/s |
+| GEMM + other work (measured)   |       0.837 ms |         1.19 |   0.259 ms |         912 tok/s |
+| Faster GEMM + other work       |       0.656 ms |         1.52 |   0.259 ms |       1,093 tok/s |
+| Modelled hardware + other work |       0.381 ms |         2.62 |   0.259 ms |       1,562 tok/s |
+| Modelled hardware only         |       0.381 ms |         2.62 |          0 |       2,627 tok/s |
+
+We know from 1.2 that mlxlm prefill kernel is faster than omlx.
+Lets
+1. profile both prefill kernels to understand both
+2. understand by omlx prefill kernels are slower, what are the exact time used
+3. Draft better omlx prefill kerenls inspired by mlxlm example
+4. Test those in omlx run

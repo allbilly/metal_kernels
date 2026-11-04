@@ -17,6 +17,14 @@ Rules for agents working in this repo.
 - After any table edit, re-check every table block in the file (header, separator, all rows) and fix ragged columns before finishing.
 - Default to one table per engine. If merging tables, keep each engine's rows in its own contiguous block (diagonal `—` pattern); don't interleave engines or collapse multiple kernels into one row.
 - Keep each measurement in one table; reference it from prose instead of duplicating the numbers.
+- Tables carry their own provenance: label rows `measured` vs `modelled`, and put assumptions in numbered notes (`1.`, `2.`) under the table, not prose paragraphs.
+- Show time and rate together (`ms` and `TFLOP/s`), so every speed in the table is checkable arithmetic.
+- Mark rows excluded from a total with `†` and define it in the notes.
+- Lead a table with one line; no rationale paragraph before it.
+- Every constant names its measurement (script or command) and the observed range; use the best measured value, not a rounded-up one, and say which numbers are nominal (e.g. 68.3 GB/s) vs measured (58.2).
+- Rebasing a constant means updating every derived number in `README.md` and `README_full.md`: tables, percentages in prose, and unit-table SOL rows.
+- After rebasing, `rg` the old value in both files to catch prose and duplicated sections.
+- No duplicate section numbers or engine sections across `README.md` and `README_full.md`; moving a section deletes it from the source and closes the numbering gap.
 - In paired comparisons, give explicit wins for both sides (e.g. `0/10`), not `—` for the baseline.
 - If a request is ambiguous about scope, ask before expanding it. Never assume "update X" means "rewrite X".
 - Prefer simple commands over explanatory prose when the user asks for commands.

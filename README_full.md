@@ -402,7 +402,7 @@ Caveats: the occupancy line is a register-ceiling lookup, not achieved occupancy
 
 # 1.6 analyze llama.cpp
 
-llama.cpp is 31.5 tok/s, so it is 80% of the 39.3 measured SOL and needs +25% to reach 39.3; default `-fa auto` beat on/off, so profile `mul_mv` next.
+llama.cpp is 31.5 tok/s, so it is 81% of the 38.7 measured SOL and needs +23% to reach 38.7; default `-fa auto` beat on/off, so profile `mul_mv` next.
 
 # 1.7 analyze ollama
 
@@ -430,11 +430,11 @@ tinygrad BEAM=4 is 59.0% of SOL and needs +69% to SOL; BEAM search already tunes
 
 # 1.13 analyze mlx_lm
 
-mlx_lm is 36.3 tok/s, 92% of the 39.3 measured SOL; GEMV is 97.6% of kernel time and already near DRAM, so the remaining work is bm selection or quantization (README §1.5).
+mlx_lm is 36.3 tok/s, 94% of the 38.7 measured SOL; GEMV is 97.6% of kernel time and already near DRAM, so the remaining work is bm selection or quantization (README §1.5).
 
 # 1.14 analyze oMLX
 
-oMLX is 35.5 tok/s, 90% of the 39.3 measured SOL; it is tied with mlx_lm, so porting or tuning its GEMV is not justified before quantization (README §1.6).
+oMLX is 35.5 tok/s, 92% of the 38.7 measured SOL; it is tied with mlx_lm, so porting or tuning its GEMV is not justified before quantization (README §1.6).
 
 # 1.15 backup
 
@@ -471,7 +471,7 @@ python benchmarks/gemv_chain.py --passes 10
 |--------:|--------:|---------:|-----:|-------------------------------------|
 |     187 | 1.50 GB | 25.85 ms | 58.2 | all 9 GEMV shapes; no attention/GDN |
 
-Roofline: 1.505 GB/token; 68.3 GB/s nominal = 45.4 tok/s, 59.2 GB/s measured = 39.3 tok/s; 36.3 tok/s is 92% of measured. GEMV sensitivity: README.md §1.7.
+Roofline: 1.505 GB/token; 68.3 GB/s nominal = 45.4 tok/s, 58.2 GB/s measured = 38.7 tok/s; 36.3 tok/s is 94% of measured. GEMV sensitivity: README.md §1.7.
 
 ```bash
 python experimental/benchmarks/gemv.py --k 1024 --n 248320 --paired --rounds 10 --warmup-seconds 2
@@ -481,105 +481,6 @@ Paired ABBA, 1024/248320, 2 s warmup — negative control:
 | variant  | ratio vs MLX | wins |
 |----------|-------------:|-----:|
 | custom64 | 0.997        | 5/10 |
-
-
-
-
-## 1.4 mlx_lm qwen3.5 0.8b decode
-
-```bash
-python benchmarks/decode_trace.py > /tmp/decode.log 2>&1 &
-PID=$!
-while ! grep -q READY /tmp/decode.log; do sleep 1; done
-scripts/profile.sh --attach "$PID" --seconds 20 --kernels --out traces/timeline-baseline
-```
-
-Trace session: 32.5 tok/s (30.75 ms/token), 64 decode tokens. The paired engine A/B is 36.9 vs 35.4 tok/s (§1.2).
-The trace prompt was the first 5,465 bytes of the 10k file.
-
-| kernel             | intervals % | ms/token | what it does                                        |
-|--------------------|------------:|---------:|-----------------------------------------------------|
-| `gemv`             |        97.5 |    26.41 | BF16 GEMV for decode linear layers                  |
-| ↳ `bm8`            |        49.5 |    13.41 | 8 simdgroup rows per threadgroup                    |
-| ↳ `bm4`            |        48.0 |    13.00 | 4 simdgroup rows                                    |
-| ↳ `bm1`            |         0.0 |     0.00 | 1 simdgroup row (small matrices)                    |
-| `sdpa_vector`      |         1.6 |     0.43 | single-token attention over KV cache (head dim 256) |
-| rest               |         0.7 |     0.18 | small kernels: argmax, copies, elementwise          |
-| `gated_delta_step` |         0.1 |     0.04 | one step of the gated delta rule (linear attention) |
-| `rms`              |         0.1 |     0.02 | RMSNorm                                             |
-| `sigmoid+mul`      |         0.1 |     0.02 | fused sigmoid gate × value                          |
-| host/queue gap     |           — |     3.66 | —                                                   |
-| **total**          |       100.0 |    30.75 |                                                     |
-
-| metric   | paired A/B | measured SOL |
-|----------|-----------:|-------------:|
-| tok/s    |       36.9 |         39.3 |
-| ms/token |      27.09 |        25.42 |
-| GB/s     |       55.6 |         59.2 |
-| % SOL    |        94% |         100% |
-
-Measured SOL = 1.505 GB/token ÷ 59.2 GB/s = 25.42 ms/token → 39.3 tok/s; 1.505 GB is the 0.752B-param text model at 2 bytes, and 59.2 GB/s is the measured streaming read from a 512 MB MLX buffer (87% of the 68.3 GB/s nominal), so the SOL is conservative.
-
-The 187 tensors behind that 1.505 GB:
-
-| shape (N×K)  | tensors |     GB |
-|--------------|--------:|-------:|
-| 248320×1024  |       1 |  0.509 |
-| 3584×1024    |      48 |  0.352 |
-| 6144×1024    |      18 |  0.227 |
-| 1024×3584    |      24 |  0.176 |
-| 1024×2048    |      24 |  0.101 |
-| 2048×1024    |      18 |  0.076 |
-| 4096×1024    |       6 |  0.050 |
-| 512×1024     |      12 |  0.013 |
-| 16×1024      |      36 |  0.001 |
-| **total**    | **187** |  1.505 |
-
-## 1.5 omlx qwen3.5 0.8b prefill
-
-Prefill trace uses `benchmark_prompt_10k.txt` (10,000 tokens).
-
-```bash
-OMLX=/Applications/oMLX.app/Contents/MacOS/omlx-cli
-$OMLX serve --port 8005 --headless &
-PID=$!
-for i in {1..120}; do curl -sf -H 'Authorization: Bearer 1234' -o /dev/null http://127.0.0.1:8005/v1/models && break; sleep 1; done
-curl -s -H 'Authorization: Bearer 1234' -H 'Content-Type: application/json' \
-  http://127.0.0.1:8005/v1/completions \
-  --data-binary "$(jq -n --arg p "$(cat benchmark_prompt_10k.txt)" '{model:"mlx-community--Qwen3.5-0.8B-bf16",prompt:$p,max_tokens:1,temperature:0}')" \
-  | jq -r '.usage.prompt_tokens_per_second'
-kill $PID
-```
-
-| kernel                  | intervals % | what it does                          |
-|-------------------------|------------:|---------------------------------------|
-| `steel_gemm`            |        76.6 | q/k/v/o and MLP GEMM                  |
-| ↳ `nt bm64_bn32_bk32`   |        63.9 | x @ w.T, 64×32: q/k/v/o, MLP up/gate  |
-| ↳ `nn bm64_bn64_bk16`   |        12.7 | x @ w, 64×64 tile                     |
-| `gdn`                   |         8.4 | GDN mixer                             |
-| `looped_softmax`        |         4.0 | attention softmax                     |
-| `sigmoid+mul`           |         2.2 | fused gating                          |
-| `select`                |         2.1 | attention mask/index                  |
-| copies                  |         1.7 | layout/cast copies                    |
-| `gemv`                  |         1.3 | one decode token                      |
-| `depthwise_conv`        |         0.8 | GDN conv                              |
-| `rms`                   |         0.7 | RMSNorm                               |
-| `fa256`                 |         0.7 | attention                             |
-| rest                    |         1.5 | sdpa, RoPE, elementwise               |
-| **total**               |       100.0 | rounded                               |
-
-| unit                   | TFLOP/s | isolated GEMM | % of isolated | 10k prefill tok/s |
-|------------------------|--------:|--------------:|--------------:|------------------:|
-| bf16 `steel_gemm`      |    1.19 |         1.517 |           78% |             912.0 |
-| bf16 CPU GEMM (ref)    |    0.44 |         1.010 |           44% |                 — |
-
-Projection: if the model weight were released in fp16, the same shapes run at:
-
-| unit                   | TFLOP/s | isolated GEMM | % of isolated | 10k prefill tok/s |
-|------------------------|--------:|--------------:|--------------:|------------------:|
-| fp16 est. `steel_gemm` |    1.46 |         1.858 |           78% |              1061 |
-
-`fp16 est.` assumes casting the same weights; the CPU row is the same eight shapes as §1.3 on `mx.cpu`, where bf16 converts to fp32 and the 1.01 TFLOP/s fp32 GEMM is its best measured; the fp16 gain is cheaper bf16→fp32 conversion.
 
 ## 1.6 omlx qwen3.5 0.8b decode
 
@@ -596,8 +497,6 @@ scripts/profile.sh --attach "$PID" --seconds 3 --kernels --out traces/omlx-decod
 kill $PID
 ```
 
-Kernel mix from a 0.7.4.dev1 decode trace; ms/token scaled to the paired 35.4 tok/s. The A/B is 35.4 vs 36.9 (§1.2).
-
 | kernel                    | intervals % | ms/token | what it does                          |
 |---------------------------|------------:|---------:|---------------------------------------|
 | `gemv`                    |        98.0 |    27.70 | BF16 GEMV for decode linear layers    |
@@ -608,20 +507,23 @@ Kernel mix from a 0.7.4.dev1 decode trace; ms/token scaled to the paired 35.4 to
 | rest                      |         0.4 |     0.12 | small kernels: rms, copies, argmax    |
 | **total**                 |       100.0 |    28.27 |                                       |
 
+1. Kernel mix from a 0.7.4.dev1 decode trace; ms/token scaled to the paired 35.4 tok/s.
+2. The A/B is 35.4 vs 36.9 tok/s (§1.2).
+
 | metric   | paired A/B | measured SOL |
 |----------|-----------:|-------------:|
-| tok/s    |       35.4 |         39.3 |
-| ms/token |      28.27 |        25.42 |
-| GB/s     |       53.2 |         59.2 |
-| % SOL    |        90% |         100% |
+| tok/s    |       35.4 |         38.7 |
+| ms/token |      28.27 |        25.86 |
+| GB/s     |       53.2 |         58.2 |
+| % SOL    |        91% |         100% |
 
-Measured SOL = 1.505 GB/token ÷ 59.2 GB/s = 25.42 ms/token → 39.3 tok/s; 1.505 GB is the 0.752B-param text model at 2 bytes, and 59.2 GB/s is the measured streaming read from a 512 MB MLX buffer (87% of the 68.3 GB/s nominal), so the SOL is conservative.
+1. Measured SOL = 1.505 GB/token ÷ 58.2 GB/s = 25.86 ms/token → 38.7 tok/s; 58.2 GB/s is the best measured streaming read (85% of the 68.3 GB/s nominal).
 
 ## 1.7 analyze mlx_lm
 
 1.2 shows mlx_lm at 36.9 tok/s vs oMLX at 35.4;
 
-GEMV is 97.5% of kernel time; the table below is a nominal sensitivity (68.3 GB/s = 45.4 tok/s), while §1.4/§1.6 use the measured 59.2 GB/s roofline.
+GEMV is 97.5% of kernel time; the table below is a nominal sensitivity (68.3 GB/s = 45.4 tok/s), while §1.4/§1.6 use the measured 58.2 GB/s roofline.
 
 | GEMV gain | GB/s | ms/token | tok/s |    e2e |
 |----------:|-----:|---------:|------:|-------:|
@@ -643,7 +545,7 @@ python benchmarks/gemv_chain.py --passes 10
 
 The same shapes in fp16 reach 1.858 TFLOP/s weighted (§1.3/§1.5), so 1.517 is a bf16-kernel ceiling, not the M1 limit.
 
-MegaQwen's best e2e result is +1.2% and its MLP block is ~1%, with fusion capped at 2.4%, so megakernels realistically give +1-2% (37.3-37.6 tok/s), not 39.3 — reaching that needs all non-GEMV work and the host gap to vanish.
+MegaQwen's best e2e result is +1.2% and its MLP block is ~1%, with fusion capped at 2.4%, so megakernels realistically give +1-2% (37.3-37.6 tok/s), not 38.7 — reaching that needs all non-GEMV work and the host gap to vanish.
 
 ## 1.8 analyze omlx
 
@@ -660,10 +562,10 @@ tinygrad BEAM=0 is 16.8 tok/s and BEAM=4 is 25.2, against mlx_lm at 36.9.
 | variant         | tok/s | ms/token | GB/s | %SOL |
 |-----------------|------:|---------:|-----:|-----:|
 | tinygrad BEAM=0 |  16.8 |    59.52 | 25.3 |   43 |
-| tinygrad BEAM=4 |  25.2 |    39.68 | 37.9 |   64 |
-| mlx_lm          |  36.9 |    27.09 | 55.6 |   94 |
-| measured SOL    |  39.3 |    25.42 | 59.2 |  100 |
+| tinygrad BEAM=4 |  25.2 |    39.68 | 37.9 |   65 |
+| mlx_lm          |  36.9 |    27.09 | 55.6 |   95 |
+| measured SOL    |  38.7 |    25.86 | 58.2 |  100 |
 
-BEAM=4 is 64% of measured SOL, so it needs +46% to match mlx_lm and +56% to reach 39.3.
+BEAM=4 is 65% of measured SOL, so it needs +46% to match mlx_lm and +54% to reach 38.7.
 
 BEAM search already tunes its kernels, and latest commits (f5ac546, 45e6a26, bd683c4) fail decode with an LLVM IR error, so there is no newer number and no GEMV port/tune worth doing.
