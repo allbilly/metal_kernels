@@ -29,6 +29,7 @@ Rules for agents working in this repo.
 - Set temperature to 0 directly in benchmark commands when the tool exposes that option; do not explain it separately.
 - Keep README install/test commands in order: oMLX, mlx_lm; other engines are in `README_full.md`.
 - Do not add bare kernel-name lists; give the measured share or the relevant code instead.
+- Never drop a measured `ms`/time column or total when editing a table; keep the time next to its rate.
 
 ## Verify before claiming
 
