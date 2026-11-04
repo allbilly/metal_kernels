@@ -1,7 +1,7 @@
 # README
 
 This is a repo learning metal kernels on m1 air 8gb macOS 27.2.
-I want to write sth like the [yalm blog by andrewkchan](https://andrewkchan.dev/posts/yalm.html) 
+I want to write sth like the [yalm blog by andrewkchan](https://andrewkchan.dev/posts/yalm.html)
 
 The plan
 1. profile qwen3.5 0.8B metal kernels from oMLX / mlx_lm (other engines: `README_full.md`)
@@ -103,24 +103,17 @@ So 76.4% time spent on GEMM, lets see what are the shapes ran.
 |  1 † | 1024 | 248320 |       1 |       — |            — |
 |  mix |    — |      — |     186 |   0.656 |        1.517 |
 
-† The M=1 row is the LM head, run once per step as a GEMV, excluded from the baseline.
+1. † The M=1 row is the LM head, run once per step as a GEMV, excluded from the baseline.
+2. `ms` is per dispatch at M=2048; `mix` is the 10k prompt (4×2048 + 1807) and the baseline.
 
-`ms` is per dispatch at M=2048; `mix` is the 10k prompt (4×2048 + 1807) and the baseline.
+If we can make GEMM faster or remove other work,
 
-Inference runs `steel_gemm` at 1.24 TFLOP/s, 82% of the 1.517 isolated baseline. If only GEMM gets faster, Amdahl's law projects (not measures):
+| Scenario                       |      GEMM time | GEMM TFLOP/s | Other work |     Prefill speed |
+|--------------------------------|---------------:|-------------:|-----------:|------------------:|
+| GEMM + other work (measured)   |       0.801 ms |         1.24 |   0.248 ms |         954 tok/s |
+| Faster GEMM + other work       |       0.656 ms |         1.52 |   0.248 ms |       1,106 tok/s |
+| Modelled hardware + other work |       0.381 ms |         2.62 |   0.248 ms |       1,592 tok/s |
+| Modelled hardware only         |       0.381 ms |         2.62 |          0 |       2,627 tok/s |
 
-| achieved GEMM TFLOP/s | projected prefill |    speedup |
-|-----------------------|------------------:|-----------:|
-| 1.24 (current)        |               954 |      1.00× |
-| 1.517 (isolated)      |              1106 |      1.16× |
-| 2.00                  |              1344 |      1.41× |
-| 2.62 (32-256 tiles)   |         1577-1592 | 1.65-1.67× |
-
-The 8×8×8 MMA microbenchmark read 1.56× the fp32 peak and is discarded. The peak derives like an NPU's TOPS: 8 cores × 16 execution units × 8 fp32 lanes × 2 (FMA) × 1.278 GHz = 2.62 TFLOP/s, which bounds bf16 too because MLX converts bf16 to fp32.
-
-The 2.62 row is a conditional shape-aware roofline from `scripts/model_prefill_max.py`: it assumes 2.62 TFLOP/s (the fp32 rating) is the bf16 ceiling, and includes tile padding and wave occupancy. Padding costs 0.36% of FLOPs, so large GEMMs sit at ~60% of the model and the gap is not explained by shape.
-
-| unit                   | TFLOP/s | isolated GEMM | % of isolated | 10k prefill tok/s |
-|------------------------|--------:|--------------:|--------------:|------------------:|
-| bf16 `steel_gemm`      |    1.24 |         1.517 |           82% |             954.0 |
-| bf16 CPU GEMM (ref)    |    0.44 |         1.010 |           44% |                 — |
+1. The 0.656 ms is the measured isolated GEMM mix and 0.801 ms is inferred from the measured prefill;
+2. the 0.381 ms row is modelled, assuming Apple's 2.62 TFLOP/s fp32 rating (8 cores × 16 execution units × 8 fp32 lanes × 2 (FMA) × 1.278 GHz), not a verified bf16 maximum. `scripts/model_prefill_max.py` applies that peak to the eight Qwen GEMM shapes at M=2048 with tile padding and wave occupancy; padding costs 0.12% of FLOPs, and at 8-32 concurrent tiles every shape fills the machine, so the wave term is zero; only an implausible 256-tile capacity would cost another 1%.

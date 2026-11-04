@@ -64,8 +64,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--peak", type=float, nargs="+", default=[2.62, 2.0, 1.5],
                     help="assumed BF16 TFLOP/s (default: 2.62 2.0 1.5)")
-    ap.add_argument("--capacity", type=int, nargs="+", default=[32, 64, 128, 256],
-                    help="concurrent output tiles per GPU (default: 32 64 128 256)")
+    ap.add_argument("--capacity", type=int, nargs="+", default=[8, 16, 32, 64],
+                    help="concurrent output tiles per GPU (default: 8 16 32 64)")
     args = ap.parse_args()
 
     print("isolated GEMM-only: %.3f ms/token -> %.0f tok/s (not end-to-end)"
