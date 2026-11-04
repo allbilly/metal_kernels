@@ -109,25 +109,18 @@ So 76.4% time spent on GEMM, lets see what are the shapes ran.
 
 Inference runs `steel_gemm` at 1.24 TFLOP/s, 82% of the 1.517 isolated baseline. If only GEMM gets faster, Amdahl's law projects (not measures):
 
-| achieved GEMM TFLOP/s | projected prefill | speedup |
-|-----------------------|------------------:|--------:|
-| 1.24 (current)        |               954 |   1.00× |
-| 1.52 (isolated)       |              1110 |   1.16× |
-| 2.00                  |              1344 |   1.41× |
-| 3.00                  |              1729 |   1.81× |
-| instantaneous         |              4042 |   4.24× |
+| achieved GEMM TFLOP/s | projected prefill |    speedup |
+|-----------------------|------------------:|-----------:|
+| 1.24 (current)        |               954 |      1.00× |
+| 1.517 (isolated)      |              1106 |      1.16× |
+| 2.00                  |              1344 |      1.41× |
+| 2.62 (32-256 tiles)   |         1577-1592 | 1.65-1.67× |
 
-The 8×8×8 MMA microbenchmark read 1.56× the fp32 peak and is discarded. The peak itself derives like an NPU's TOPS: 8 cores × 16 execution units × 8 fp32 lanes × 2 (FMA) × 1.278 GHz = 2.62 TFLOP/s, which is the bf16 bound too because MLX converts bf16 to fp32 and runs fp32 math; a native fp16 path could in principle be 2×, but bf16 has none. With the measured 59.2 GB/s, the standard SOL roofline (SOL-ExecBench/SOLAR: T ≥ max(FLOPs/peak, bytes/BW)) gives 0.383 ms/token of GEMM, so the hardware limit is ~1,585 tok/s. That models only compute and memory, not tile occupancy: the 16×1024 shape runs ~6× above its bound, but it is 0.1% of the FLOPs, so the aggregate is barely affected and 1,585 is only mildly optimistic. 4042 is the Amdahl limit with GEMM made free.
+The 8×8×8 MMA microbenchmark read 1.56× the fp32 peak and is discarded. The peak derives like an NPU's TOPS: 8 cores × 16 execution units × 8 fp32 lanes × 2 (FMA) × 1.278 GHz = 2.62 TFLOP/s, which bounds bf16 too because MLX converts bf16 to fp32.
+
+The 2.62 row is a conditional shape-aware roofline from `scripts/model_prefill_max.py`: it assumes 2.62 TFLOP/s (the fp32 rating) is the bf16 ceiling, and includes tile padding and wave occupancy. Padding costs 0.36% of FLOPs, so large GEMMs sit at ~60% of the model and the gap is not explained by shape.
 
 | unit                   | TFLOP/s | isolated GEMM | % of isolated | 10k prefill tok/s |
 |------------------------|--------:|--------------:|--------------:|------------------:|
 | bf16 `steel_gemm`      |    1.24 |         1.517 |           82% |             954.0 |
 | bf16 CPU GEMM (ref)    |    0.44 |         1.010 |           44% |                 — |
-
-Projection, fp16 weights:
-
-| unit                   | TFLOP/s | isolated GEMM | % of isolated | 10k prefill tok/s |
-|------------------------|--------:|--------------:|--------------:|------------------:|
-| fp16 est. `steel_gemm` |    1.52 |         1.858 |           82% |              1110 |
-
-`fp16 est.` assumes casting the same weights; the CPU row is the same eight shapes on `mx.cpu`, where bf16 converts to fp32 (1.01 TFLOP/s).
