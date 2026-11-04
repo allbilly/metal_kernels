@@ -192,6 +192,7 @@ If we can make GEMM faster or remove other work,
 
 | Scenario                       |      GEMM time | GEMM TFLOP/s | Other work |     Prefill speed |
 |--------------------------------|---------------:|-------------:|-----------:|------------------:|
+| mlx_lm (ref, §1.3)             |       0.801 ms |         1.24 |   0.248 ms |         954 tok/s |
 | GEMM + other work (measured)   |       0.837 ms |         1.19 |   0.259 ms |         912 tok/s |
 | Faster GEMM + other work       |       0.656 ms |         1.52 |   0.259 ms |       1,093 tok/s |
 | Modelled hardware + other work |       0.381 ms |         2.62 |   0.259 ms |       1,562 tok/s |
@@ -201,14 +202,6 @@ If we can make GEMM faster or remove other work,
 2. The 0.381 ms row is modelled from Apple's 2.62 TFLOP/s fp32 rating, as in §1.3.
 
 ### 1.5.1 optimize omlx prefill
-
-| Scenario                       |      GEMM time | GEMM TFLOP/s | Other work |     Prefill speed |
-|--------------------------------|---------------:|-------------:|-----------:|------------------:|
-| mlx_lm (ref, §1.3)             |       0.801 ms |         1.24 |   0.248 ms |         954 tok/s |
-| GEMM + other work (measured)   |       0.837 ms |         1.19 |   0.259 ms |         912 tok/s |
-| Faster GEMM + other work       |       0.656 ms |         1.52 |   0.259 ms |       1,093 tok/s |
-| Modelled hardware + other work |       0.381 ms |         2.62 |   0.259 ms |       1,562 tok/s |
-| Modelled hardware only         |       0.381 ms |         2.62 |          0 |       2,627 tok/s |
 
 We know from 1.2 that mlxlm prefill kernel is faster than omlx.
 Lets
