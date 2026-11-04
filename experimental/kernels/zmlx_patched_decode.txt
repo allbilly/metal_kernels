@@ -1,5 +1,5 @@
 # dispatch list only: the .gputrace has no per-kernel GPU time.
-# for real %: xctrace Shader Timeline (§1.5).
+# for real %: xctrace Shader Timeline (§1.4).
 43 kernels:
 
 Name                                                          Pipeline State      Dispatches  Debug Groups / Labels

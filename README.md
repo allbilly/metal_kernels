@@ -4,352 +4,265 @@ This is a repo learning metal kernels on m1 air 8gb macOS 27.2.
 I want to write sth like the [yalm blog by andrewkchan](https://andrewkchan.dev/posts/yalm.html) 
 
 The plan
-1. profile qwen3.6 0.8B metal kernels from ollama / llama.cpp / tinygrad / oMLX / mlx.lm / ZML / vllm-metal / ZMLX / agave (sorted by GitHub stars)
+1. profile qwen3.5 0.8B metal kernels from oMLX / mlx_lm (other engines: `README_full.md`)
 2. PR the faster kernel to the slower engine
-2. Bypass apple code with AGXForge(https://github.com/sbryngelson/agxforge) 
+3. Bypass apple code with AGXForge(https://github.com/sbryngelson/agxforge)
 
-# 1.1 Install ollama / llama.cpp / tinygrad / oMLX / mlx.lm / ZML / vllm-metal / ZMLX / agave
+# 1.1 Install oMLX / mlx_lm
 
 ```bash
-# ollama
-brew install ollama
-
 uv venv --python 3.13
 source .venv/bin/activate
-uv pip install huggingface-hub
-
-# llama.cpp
-brew install llama.cpp
-hf download ggml-org/Qwen3.5-0.8B-GGUF Qwen3.5-0.8B-BF16.gguf --local-dir ~/.cache/gguf
-
-# tinygrad
-uv pip install 'tinygrad @ git+https://github.com/tinygrad/tinygrad.git@ce9c84605e94de9667fb578c1ff3fa8678725a87'
-
-# oMLX (GUI install: open the .dmg and drag to Applications)
-wget https://github.com/jundot/omlx/releases/download/v0.7.3rc1/oMLX-0.7.3rc1-macos26-27.dmg
+uv tool install hf
+hf download mlx-community/Qwen3.5-0.8B-bf16
 
 # mlx_lm
 uv pip install 'mlx-lm==0.32.2'
-hf download mlx-community/Qwen3.5-0.8B-bf16 --local-dir ~/.cache/models/Qwen3.5-0.8B-bf16
 
-# ZML / LLMD (Metal)
-brew install zml/zml/llmd
-hf download Qwen/Qwen3.5-0.8B
-
-# vllm-metal
-brew tap vllm-project/vllm-metal https://github.com/vllm-project/vllm-metal
-brew trust vllm-project/vllm-metal
-brew install vllm-project/vllm-metal/vllm-metal
-
-# ZMLX
-uv pip install 'zmlx[lm]'
-
-# agave (Zig 0.17, https://github.com/maci0/agave)
-brew install zig
-git clone --depth 1 https://github.com/maci0/agave
-cd agave
-zig build -Denable-debug=false -Denable-bench=false \
-  -Denable-gemma4=false -Denable-diffusion-gemma=false -Denable-qwen4exp=false -Denable-qwen4-exp=false \
-  -Denable-deepseek4=false -Denable-llama4=false -Denable-dflash2=false \
-  -Denable-vulkan=false -Denable-cuda=false -Denable-rocm=false -Denable-webgpu=false
-cd ..
-
-# mps-linear-attn (PyTorch/MPS kernel patch, not an engine)
-git clone https://github.com/mpsops/mps-linear-attention
-uv venv --python 3.12 .venv-mla
-uv pip install --python .venv-mla/bin/python torch==2.15.0 transformers setuptools wheel
-sed -i '' "s/'-std=c++17', '-O3'/'-std=c++20', '-O3', '-Wno-invalid-specialization'/" mps-linear-attention/setup.py
-SDKROOT=$(xcrun --show-sdk-path) CC=/usr/bin/clang CXX=/usr/bin/clang++ \
-  uv pip install --python .venv-mla/bin/python --no-build-isolation -e mps-linear-attention
+# oMLX (GUI install: open the .dmg and drag to Applications)
+wget https://github.com/jundot/omlx/releases/download/v0.7.3/oMLX-0.7.3-macos26-27.dmg
 ```
 
 # 1.2 Test run
 
 Low Power Mode roughly halves Metal decode on this M1 Air (`pmset -g | grep lowpowermode`). Disable it before benchmarking: `sudo pmset -a lowpowermode 0`; restore with `1`.
 
-```bash
-# ollama (BF16 default)
-MODEL=qwen3.5:0.8b-bf16
-ollama serve &
-for i in {1..120}; do curl -s -o /dev/null http://127.0.0.1:11434/api/tags && break; sleep 1; done
-ollama pull "$MODEL"
-for i in {1..5}; do
-  curl -s http://127.0.0.1:11434/api/generate \
-    -d "$(jq -n --arg model "$MODEL" --arg prompt "$(cat benchmark_prompt.txt)" '{model:$model,prompt:$prompt,stream:false,options:{num_predict:16,temperature:0}}')" \
-    | jq -r '.eval_count / (.eval_duration/1e9)'
-done
-
-# llama.cpp
-for i in {1..5}; do
-  /usr/bin/time -l llama-cli -m ~/.cache/gguf/Qwen3.5-0.8B-BF16.gguf -f benchmark_prompt.txt -n 16 --temp 0 -ngl all --perf --no-display-prompt --simple-io
-done
-
-# llama.cpp CPU
-for i in {1..5}; do
-  /usr/bin/time -l llama-cli -m ~/.cache/gguf/Qwen3.5-0.8B-BF16.gguf -f benchmark_prompt.txt -n 16 --temp 0 -ngl 0 --perf --no-display-prompt --simple-io
-done
-
-# tinygrad, restart with desired BEAM value and matching cache (beam-1.db, beam-2.db, ...)
-BEAM=0 CACHEDB=~/.cache/tinygrad/beam-0.db python -m tinygrad.llm --model ~/.cache/gguf/Qwen3.5-0.8B-BF16.gguf --serve 8002 &
-for i in {1..900}; do curl -s -o /dev/null http://127.0.0.1:8002/v1/models && break; sleep 1; done
-for i in {1..5}; do
-  curl http://127.0.0.1:8002/v1/chat/completions \
-    -H 'Content-Type: application/json' \
-    --data-binary "$(jq -n --arg prompt "$(cat benchmark_prompt.txt)" '{model:"Qwen3.5-0.8B",messages:[{role:"user",content:$prompt}],max_tokens:16,temperature:0}')"
-done
-
-# mlx-lm
-for i in {1..5}; do
-  mlx_lm.generate --model ~/.cache/models/Qwen3.5-0.8B-bf16 -p "$(cat benchmark_prompt.txt)" -m 16 --temp 0
-done
-
-# ZML / LLMD (8GB: fraction 0.6, 2048 context, local checkpoint)
-SNAP=$(ls -d ~/.cache/huggingface/hub/models--Qwen--Qwen3.5-0.8B/snapshots/*/ | head -1)
-llmd --model="$SNAP" --model-name=Qwen3.5-0.8B \
-  --max-context-len=2048 --token-batch-size=512 --prefill-chunk-size=128 \
-  --batch-size=1 --gpu-memory-fraction=0.6 --cache-memory-fraction=0.5 \
-  --listen=127.0.0.1:8004 &
-for i in {1..600}; do curl -s -o /dev/null http://127.0.0.1:8004/v1/models && break; sleep 1; done
-for i in {1..5}; do
-  curl http://127.0.0.1:8004/v1/chat/completions \
-    -H 'Content-Type: application/json' \
-    --data-binary "$(jq -n --arg prompt "$(cat benchmark_prompt.txt)" '{model:"Qwen3.5-0.8B",messages:[{role:"user",content:$prompt}],max_tokens:16,temperature:0}')"
-done
-
-# vllm-metal
-MTL_CAPTURE_ENABLED=1 VLLM_METAL_KV_COMMIT_PROBE=0 vllm serve mlx-community/Qwen3.5-0.8B-bf16 --port 8003 --max-model-len 2048 --gpu-memory-utilization 0.95 &
-for i in {1..300}; do curl -s -o /dev/null http://127.0.0.1:8003/v1/models && break; sleep 1; done
-for i in {1..5}; do
-  curl http://127.0.0.1:8003/v1/completions \
-    -H 'Content-Type: application/json' \
-    --data-binary "$(jq -n --arg prompt "$(cat benchmark_prompt.txt)" '{model:"mlx-community/Qwen3.5-0.8B-bf16",prompt:$prompt,max_tokens:16,temperature:0}')"
-done
-# decode tok/s = 1 / (sum / count)
-curl -s http://127.0.0.1:8003/metrics | grep request_time_per_output_token_seconds_
-
-# zmlx: runs stock mlx_lm first ("baseline", no patches), then the same model
-# with zmlx.patch applied ("patched"); table averages the 5 gen tok/s of each
-python -m zmlx.validate ~/.cache/models/Qwen3.5-0.8B-bf16 --max-tokens 16 --runs 5 --prompt "$(cat benchmark_prompt.txt)"
-
-# agave
-agave/zig-out/bin/agave ~/.cache/gguf/Qwen3.5-0.8B-BF16.gguf --backend metal --ctx-size 2048 \
-  -n 16 -t 0 --seed 42 "$(cat benchmark_prompt.txt)"
-
-# mps-linear-attn (drop the import for baseline; 23.2 -> 27.6 tok/s)
-uv run --no-project --python .venv-mla/bin/python python -c 'import time,torch; import mps_linear_attn; from transformers import Qwen3_5ForConditionalGeneration,AutoTokenizer; p="Qwen/Qwen3.5-0.8B"; t=AutoTokenizer.from_pretrained(p,trust_remote_code=True); m=Qwen3_5ForConditionalGeneration.from_pretrained(p,trust_remote_code=True,dtype=torch.float16).to("mps"); i=t("hi",return_tensors="pt").to("mps"); m.generate(**i,max_new_tokens=4,do_sample=False); torch.mps.synchronize(); s=time.time(); m.generate(**i,max_new_tokens=64,do_sample=False); torch.mps.synchronize(); print(64/(time.time()-s))'
-```
-
-| Engine          | Model                  | Decode tok/s (5-run avg)     | Startup/search | Runtime memory | bandwidth used (68.3 GB/s) |
-|-----------------|------------------------|------------------------------|----------------|----------------|----------------------------|
-| mlx_lm          | Qwen3.5-0.8B BF16      | 33.3 tok/s                   | -              | 2.32 GB        | ~78.0%                     |
-| oMLX            | Qwen3.5-0.8B BF16      | 33.0 tok/s                   | -              | 2.49 GB        | ~77.3%                     |
-| Ollama          | Qwen3.5-0.8B BF16 GGUF | 30.6 tok/s                   | -              | 1.77 GB        | ~67.2%                     |
-| vllm-metal      | Qwen3.5-0.8B BF16      | 28.0 tok/s                   | ~15s           | ~3.6 GB        | ~65.6%                     |
-| ZMLX            | Qwen3.5-0.8B BF16      | 25.4 patched / 34.5 baseline | -              | 2.31 GB        | ~59.5% / ~80.4%            |
-| tinygrad BEAM=4 | Qwen3.5-0.8B BF16 GGUF | 25.2 tok/s                   | ~10m 45s       | 2.73 GB        | ~59.0%                     |
-| ZML llmd        | Qwen3.5-0.8B BF16      | 24.5 tok/s                   | ~34s           | ~5.2 GB        | ~57.4%                     |
-| llama.cpp       | Qwen3.5-0.8B BF16 GGUF | 23.9 tok/s                   | -              | 2.70 GB        | ~55.9%                     |
-| tinygrad BEAM=3 | Qwen3.5-0.8B BF16 GGUF | 23.2 tok/s                   | ~6m 45s        | 2.67 GB        | ~54.3%                     |
-| tinygrad BEAM=0 | Qwen3.5-0.8B BF16 GGUF | 16.0 tok/s                   | -              | 1.94 GB        | ~37.5%                     |
-| tinygrad BEAM=2 | Qwen3.5-0.8B BF16 GGUF | 15.0 tok/s                   | 4m 09s         | 2.60 GB        | ~35.1%                     |
-| Agave           | Qwen3.5-0.8B BF16 GGUF | 13.7 tok/s                   | -              | 1.79 GB        | ~30.1%                     |
-| tinygrad BEAM=5 | Qwen3.5-0.8B BF16 GGUF | 13.2 tok/s                   | ~12m 54s       | 2.79 GB        | ~30.9%                     |
-| tinygrad BEAM=1 | Qwen3.5-0.8B BF16 GGUF | 12.8 tok/s                   | 2m 14s         | 2.57 GB        | ~30.0%                     |
-| llama.cpp CPU   | Qwen3.5-0.8B BF16 GGUF | 2.2 tok/s                    | -              | ~2.0 GB        | ~4.8%                      |
-
-
-LPM off; 5-run averages. All rows re-run except the tinygrad BEAM sweep (BEAM=1 re-run at 12.8).
-
-TensorFold v1.2.0 rejects Qwen3.5-0.8B: `tensorfold info` reports `qwen3_5` full precision, 1.61 GiB, 3.61 GiB floor, but `serve` fails with `UnsupportedQwenGeometry`. Its native Qwen engine supports Qwen3.5-2B, not 0.8B.
-
-# 1.3 Dump the metal kernels
+Take one sample at a time, then run ABBA rounds: `mlx_lm, oMLX, oMLX, mlx_lm`. Compare each adjacent pair as a ratio; the ratio cancels thermal/DVFS drift. Five rounds gives ten pairs.
 
 ```bash
-go install github.com/tmc/gputrace/cmd/gputrace@latest
+# one mlx_lm prefill sample (10k)
+mlx_lm.generate --model mlx-community/Qwen3.5-0.8B-bf16 -p "$(cat benchmark_prompt_10k.txt)" -m 1 --temp 0
 
-# ollama (MTL_CAPTURE_ENABLED=1, then gpucapture the llama-server runner; kernel names are UUIDs)
-MTL_CAPTURE_ENABLED=1 ollama serve &
-for i in {1..120}; do curl -s -o /dev/null http://127.0.0.1:11434/api/tags && break; sleep 1; done
-curl -s http://127.0.0.1:11434/api/generate \
-  -d "$(jq -n --arg prompt "$(cat benchmark_prompt.txt)" '{model:"qwen3.5:0.8b-bf16",prompt:$prompt,stream:false,options:{num_predict:4,temperature:0}}')" > /dev/null
-gpucapture start -p $(gpucapture list | awk '/llama-server/ {print $1; exit}') -c 1 -o /tmp/ollama.gputrace &
-GP=$!
-sleep 1
-curl -s http://127.0.0.1:11434/api/generate \
-  -d "$(jq -n --arg prompt "$(cat benchmark_prompt.txt)" '{model:"qwen3.5:0.8b-bf16",prompt:$prompt,stream:false,options:{num_predict:16,temperature:0}}')" > /dev/null
-wait $GP
-gputrace kernels /tmp/ollama.gputrace
-rm -rf /tmp/ollama.gputrace "$TMPDIR"/llamaserver_*.gputrace
+# one mlx_lm decode sample (1k prefix)
+mlx_lm.generate --model mlx-community/Qwen3.5-0.8B-bf16 -p "$(head -c 5465 benchmark_prompt_10k.txt)" -m 16 --temp 0
 
-# llama.cpp (GGML_METAL_CAPTURE_COMPUTE=2 captures the 2nd graph = first decode step; graph 1 is prefill)
-MTL_CAPTURE_ENABLED=1 GGML_METAL_CAPTURE_COMPUTE=2 \
-  llama-cli -m ~/.cache/gguf/Qwen3.5-0.8B-BF16.gguf -p hi \
-  -n 2 --temp 0 -ngl all --perf --no-display-prompt --simple-io
-gputrace kernels /tmp/perf-metal-*.gputrace
-rm -rf /tmp/perf-metal-*.gputrace
-
-# tinygrad (first run waits ~2 min for the BEAM=1 search, then prints kernel names)
-DEBUG=2 BEAM=1 CACHEDB=~/.cache/tinygrad/beam-1.db python -m tinygrad.llm --model ~/.cache/gguf/Qwen3.5-0.8B-BF16.gguf --benchmark 1 2>&1 | grep '\*\*\* METAL'
-
-# oMLX (gpucapture can't attach; xctrace does. Needs MST-shader.tracetemplate from §1.5.)
-# API key: ~/.omlx/settings.json (1234 here)
+# one oMLX prefill sample
 OMLX=/Applications/oMLX.app/Contents/MacOS/omlx-cli
-$OMLX serve --model-dir ~/.cache/models --port 8005 --headless &
-SRV=$!
+$OMLX serve --port 8005 --headless &
 for i in {1..120}; do curl -s -H 'Authorization: Bearer 1234' -o /dev/null http://127.0.0.1:8005/v1/models && break; sleep 1; done
-xcrun xctrace record --template MST-shader.tracetemplate --instrument 'Metal GPU Counters' \
-  --attach $SRV --time-limit 10s --output /tmp/omlx.trace &
-XP=$!
-sleep 2
 curl -s -H 'Authorization: Bearer 1234' -H 'Content-Type: application/json' \
   http://127.0.0.1:8005/v1/completions \
-  --data-binary "$(jq -n --arg prompt "$(cat benchmark_prompt.txt)" '{model:"Qwen3.5-0.8B-bf16",prompt:$prompt,max_tokens:32,temperature:0}')" > /dev/null
-wait $XP
-xcrun xctrace export --input /tmp/omlx.trace \
-  --xpath '//trace-toc/run[@number="1"]/data/table[@schema="metal-shader-profiler-intervals"]' > /tmp/omlx_shader.xml
-rm -rf /tmp/omlx.trace
+  --data-binary "$(jq -n --arg prompt "$(cat benchmark_prompt_10k.txt)" '{model:"mlx-community--Qwen3.5-0.8B-bf16",prompt:$prompt,max_tokens:1,temperature:0}')" \
+  | jq -r '.usage.prompt_tokens_per_second'
 
-# mlx_lm (one decode step; 1.7 GB, delete after)
-MTL_CAPTURE_ENABLED=1 python -c 'import mlx.core as mx; from mlx_lm import load, stream_generate; from mlx_lm.sample_utils import make_sampler; model, tokenizer = load("mlx-community/Qwen3.5-0.8B-bf16"); prompt = open("benchmark_prompt.txt").read(); gen = stream_generate(model, tokenizer, prompt, max_tokens=3, sampler=make_sampler(temp=0)); next(gen); mx.metal.start_capture("/tmp/mlx_decode.gputrace"); next(gen); mx.metal.stop_capture()'
-gputrace kernels /tmp/mlx_decode.gputrace
-rm -rf /tmp/mlx_decode.gputrace
-
-# ZML llmd (MTL_CAPTURE_ENABLED=1 + gpucapture)
-MTL_CAPTURE_ENABLED=1 llmd --model=$HOME/.cache/models/Qwen3.5-0.8B --model-name=Qwen3.5-0.8B \
-  --max-context-len=2048 --token-batch-size=512 --prefill-chunk-size=128 --batch-size=1 \
-  --gpu-memory-fraction=0.6 --cache-memory-fraction=0.5 --listen=127.0.0.1:8004 &
-for i in {1..600}; do curl -s -o /dev/null http://127.0.0.1:8004/v1/models && break; sleep 1; done
-curl -s http://127.0.0.1:8004/v1/chat/completions -H 'Content-Type: application/json' \
-  --data-binary "$(jq -n --arg prompt "$(cat benchmark_prompt.txt)" '{model:"Qwen3.5-0.8B",messages:[{role:"user",content:$prompt}],max_tokens:4,temperature:0}')" > /dev/null
-gpucapture start -p $(gpucapture list | awk '/llmd/ {print $1; exit}') -c 1 -o /tmp/llmd.gputrace &
-GP=$!
-sleep 1
-curl -s http://127.0.0.1:8004/v1/chat/completions -H 'Content-Type: application/json' \
-  --data-binary "$(jq -n --arg prompt "$(cat benchmark_prompt.txt)" '{model:"Qwen3.5-0.8B",messages:[{role:"user",content:$prompt}],max_tokens:16,temperature:0}')" > /dev/null
-wait $GP
-gputrace kernels /tmp/llmd.gputrace
-rm -rf /tmp/llmd.gputrace "$TMPDIR"/llmd_*.gputrace
-
-# vllm-metal: MTL_CAPTURE_ENABLED=1 makes it capturable; gpucapture triggers the trace.
-# one command buffer ≈ 6 GB (4.2 GB weights); raise -c for more dispatches.
-MTL_CAPTURE_ENABLED=1 VLLM_METAL_KV_COMMIT_PROBE=0 vllm serve mlx-community/Qwen3.5-0.8B-bf16 --port 8003 --max-model-len 2048 --gpu-memory-utilization 0.95 &
-for i in {1..300}; do curl -s -o /dev/null http://127.0.0.1:8003/v1/models && break; sleep 1; done
-# warm up so the worker shows GPU time in `gpucapture list`
-curl -s http://127.0.0.1:8003/v1/completions -H 'Content-Type: application/json' \
-  --data-binary "$(jq -n --arg prompt "$(cat benchmark_prompt.txt)" '{model:"mlx-community/Qwen3.5-0.8B-bf16",prompt:$prompt,max_tokens:4,temperature:0}')" > /dev/null
-gpucapture start -p $(gpucapture list | awk '/Python/ && $4 > 0 {print $1; exit}') -c 1 -o /tmp/vllm.gputrace &
-GP=$!
-sleep 1
-curl -s http://127.0.0.1:8003/v1/completions -H 'Content-Type: application/json' \
-  --data-binary "$(jq -n --arg prompt "$(cat benchmark_prompt.txt)" '{model:"mlx-community/Qwen3.5-0.8B-bf16",prompt:$prompt,max_tokens:16,temperature:0}')" > /dev/null
-wait $GP
-gputrace kernels /tmp/vllm.gputrace
-rm -rf /tmp/vllm.gputrace "$TMPDIR"/Python_*.gputrace
-
-# sources
-ls /opt/homebrew/Cellar/vllm-metal/*/libexec/lib/python3.12/site-packages/vllm_metal/metal/kernels_v2/
-
-# zmlx (same, with the patch applied; 1.8 GB, delete after)
-MTL_CAPTURE_ENABLED=1 python -c 'import mlx.core as mx; from mlx_lm import load, stream_generate; from mlx_lm.sample_utils import make_sampler; from zmlx.patch import patch; model, tokenizer = load("mlx-community/Qwen3.5-0.8B-bf16"); patch(model); prompt = open("benchmark_prompt.txt").read(); gen = stream_generate(model, tokenizer, prompt, max_tokens=3, sampler=make_sampler(temp=0)); next(gen); mx.metal.start_capture("/tmp/zmlx_decode.gputrace"); next(gen); mx.metal.stop_capture()'
-gputrace kernels /tmp/zmlx_decode.gputrace
-rm -rf /tmp/zmlx_decode.gputrace
-
-# agave: no in-process capture hook; --profile is op timing. For a Metal trace use xctrace --launch (§1.5).
-# agave (per-op profile; no .gputrace)
-agave/zig-out/bin/agave ~/.cache/gguf/Qwen3.5-0.8B-BF16.gguf --backend metal \
-  -n 16 -t 0 --profile "hi"
+# one oMLX decode sample (1k prefix)
+curl -s -H 'Authorization: Bearer 1234' -H 'Content-Type: application/json' \
+  http://127.0.0.1:8005/v1/completions \
+  --data-binary "$(jq -n --arg prompt "$(head -c 5465 benchmark_prompt_10k.txt)" '{model:"mlx-community--Qwen3.5-0.8B-bf16",prompt:$prompt,max_tokens:16,temperature:0}')" \
+  | jq -r '.usage.generation_tokens_per_second'
 ```
 
-| engine     | dump               | capture output               | size   |
-|------------|--------------------|------------------------------|--------|
-| ollama     | `gpucapture -c 1`  | 20 UUIDs (unlabeled)         | 2.0 GB |
-| llama.cpp  | `.gputrace`        | 19 names / 682 dispatches    | 5.0 GB |
-| tinygrad   | `DEBUG=2`          | 8 fused names                | —      |
-| oMLX       | `xctrace --attach` | 102 shaders / 4566 intervals | 77 MB  |
-| mlx_lm     | `.gputrace`        | 44 names / 611 dispatches    | 1.7 GB |
-| ZML        | `gpucapture -c 1`  | 195 names / 715 dispatches   | 2.0 GB |
-| vllm-metal | `gpucapture -c 1`  | 8 names / 1 dispatch         | 5.9 GB |
-| ZMLX       | `.gputrace`        | 43 names / 611 dispatches    | 1.8 GB |
-| agave      | `--profile`        | 10 op rows                   | —      |
+| Engine | Model             | Prefill tok/s |  wins | Decode tok/s |  wins |
+|--------|-------------------|--------------:|------:|-------------:|------:|
+| mlx_lm | Qwen3.5-0.8B BF16 |         996.7 | 10/10 |         36.3 |  5/10 |
+| oMLX   | Qwen3.5-0.8B BF16 |         952.7 |  0/10 |         35.5 |  5/10 |
 
-Parse and delete in the same run; sizes are per capture. Counts are capture-scoped (one graph, one `-c 1` buffer, or 32 tokens), not per-token and not comparable; rank by time % in §1.5.
+Warm up first, both prefill and decode are paired medians; prefill uses the 10k prompt and decode its first 1k tokens; mlx_lm prefill wins 10/10, decode is a tie.
 
-# 1.4 Profile
+# 1.3 mlx_lm qwen3.5 0.8b prefill
 
-The two kernel tables need `xctrace`, not the §1.3 `.gputrace` (no timings); commands are below.
-
-| Engine          | tok/s ↑ | ms/token ↓ | command buffers ↓ | dispatches ↓ | unique kernels |
-|-----------------|---------|------------|-------------------|--------------|----------------|
-| ZMLX baseline   | 34.5    | 29.0       | 21                | 611          | 44             |
-| mlx_lm          | 33.3    | 30.0       | 21                | 611          | 44             |
-| oMLX            | 33.0    | 30.3       | 1                 | 48           | 48             |
-| vllm-metal      | 28.0    | 35.7       | 1                 | 68           | 68             |
-| ZMLX patched    | 25.4    | 39.4       | 25                | 611          | 43             |
-| llama.cpp       | 23.9    | 41.8       | 2                 | 671          | 19             |
-| tinygrad BEAM=1 | 12.8    | 78.1       | n/a               | 8            | 8              |
-
-`↑` higher is better, `↓` lower is better; `unique kernels` is descriptive.
-
-| kernel                                        | oMLX % | mlx_lm % | llama.cpp % |
-|-----------------------------------------------|--------|----------|-------------|
-| `gemv_bfloat16_bm8_*`                         | 47.8   | 45.5     | —           |
-| `gemv_bfloat16_bm4_*`                         | 48.4   | 45.2     | —           |
-| `gemv_bfloat16_bm1_*`                         | 3.0    | 1.9      | —           |
-| `rmsbfloat16`                                 | 0.03   | 1.0      | —           |
-| `omlx_qwen35_fa256_*`                         | 0.3    | —        | —           |
-| `vn_copyfloat32float16`                       | 0.2    | —        | —           |
-| oMLX rest                                     | 0.3    | —        | —           |
-| `sigmoid+mul` (MLX fused)                     | —      | 2.2      | —           |
-| `custom_kernel_gated_delta_step_packed_btree` | —      | 1.6      | —           |
-| `sdpa_vector_*`                               | —      | 0.8      | —           |
-| mlx_lm rest                                   | —      | 1.8      | —           |
-| `kernel_mul_mv_bf16_f32_4`                    | —      | —        | 42.4        |
-| `kernel_mul_mv_ext_bf16_f32_r1_2`             | —      | —        | 35.3        |
-| `kernel_mul_mv_mma_*`                         | —      | —        | 18.3        |
-| `kernel_get_rows_f32`                         | —      | —        | 1.6         |
-| `kernel_gated_delta_net_f32_4`                | —      | —        | 0.7         |
-| `kernel_ssm_conv_f32_f32_batched_4`           | —      | —        | 0.2         |
-| llama.cpp rest                                | —      | —        | 1.5         |
-
-Values are % of GPU time (oMLX/llama: Shader Timeline intervals; mlx_lm: PC samples). Ollama, vllm-metal, ZMLX, ZML, tinygrad: no per-kernel trace yet.
-
-oMLX is +0.7 tok/s (~2%).
-Its extra kernels are cheap at 32 tokens (`fa256` 0.3%, gdn 0.1%, copy 0.2%);
-the gain is a smaller non-matmul tail, 0.8% vs mlx_lm's 7.5%. `fa256` is the piece to re-test at 4k+.
+Prefill trace uses `benchmark_prompt_10k.txt` (10000 tokens).
 
 ```bash
-git clone https://github.com/Kr1sso/xtrace-skill ~/.cache/xtrace-skill
-python3 ~/.cache/xtrace-skill/scripts/trace-template.py enable-shader-timeline \
-  '/Applications/Xcode.app/Contents/Applications/Instruments.app/Contents/Packages/GPU.instrdst/Contents/Templates/Metal System Trace.tracetemplate' \
-  -o MST-shader.tracetemplate
-
-# record a 1-token prefill + 2 decode steps (keeps prefill out of the mix)
-xcrun xctrace record --template MST-shader.tracetemplate --instrument 'Metal GPU Counters' \
-  --output llama_decode.trace --time-limit 20s --launch -- \
-  llama-cli -m ~/.cache/gguf/Qwen3.5-0.8B-BF16.gguf -p hi \
-  -n 2 --temp 0 -ngl all --perf --no-display-prompt --simple-io
-
-# per-kernel % GPU time
-xcrun xctrace export --input llama_decode.trace \
-  --xpath '//trace-toc/run[@number="1"]/data/table[@schema="metal-shader-profiler-intervals"]' > shader.xml
-
-# ALU / Buffer Read / LLC / Compute Occupancy / GPU Read Bandwidth
-xcrun xctrace export --input llama_decode.trace \
-  --xpath '//trace-toc/run[@number="1"]/data/table[@schema="gpu-counter-value"]' > counters.xml
+P=$(cat benchmark_prompt_10k.txt)
+mlx_lm.generate --model mlx-community/Qwen3.5-0.8B-bf16 -p "$P" -m 1 --temp 0 > /dev/null 2>&1 &
+PID=$!
+sleep 3
+scripts/profile.sh --attach "$PID" --seconds 30 --kernels --out traces/prefill-baseline
 ```
 
-| engine    | matmul % | measured by                                     |
-|-----------|----------|-------------------------------------------------|
-| oMLX      | 99.2     | Shader Timeline intervals (gemv bm4+bm8+bm1)    |
-| llama.cpp | 96.0     | Shader Timeline intervals (mul_mv bf16+ext+mma) |
-| mlx_lm    | 92.5     | PC samples (gemv bm8+bm4+bm1)                   |
+| kernel                  | intervals % | what it does                          |
+|-------------------------|------------:|---------------------------------------|
+| `steel_gemm`            |        76.4 | q/k/v/o and MLP GEMM                  |
+| ↳ `nt bm64_bn32_bk32`   |        67.1 | same GEMMs, nt 64×32 tile             |
+| ↳ `nn bm64_bn64_bk16`   |         9.3 | same GEMMs, nn 64×64 tile             |
+| `gdn`                   |        10.1 | GDN mixer                             |
+| `sigmoid+mul`           |         3.5 | fused gating                          |
+| rest                    |         3.1 | small kernels                         |
+| `select`                |         2.3 | attention mask/index                  |
+| copies                  |         2.1 | layout/cast copies                    |
+| `depthwise_conv`        |         1.0 | GDN conv                              |
+| `gemv`                  |         0.9 | one decode token                      |
+| `rms`                   |         0.8 | RMSNorm                               |
+| **total**               |       100.0 | rounded                               |
 
-PC samples = `gpu-shader-profiler-sample` PC hits: sample counts, not durations. oMLX/llama shares are Shader Timeline interval durations.
+Prefill is compute-bound: `steel_gemm` runs at 1.22 TFLOP/s, 88% of the 1.39 TFLOP/s bf16 GEMM SOL and 30% of the 4.06 TFLOP/s MMA peak; `steel_gemm` is 76.4% of GPU kernel time, and the rest is GDN/attention. Casting the same weights to fp16 raises `steel_gemm` to 1.52 TFLOP/s (88% of the 1.73 fp16 GEMM SOL, 37% of MMA) and the full prefill from 996.7 to ~1175 tok/s (+18%).
 
-Stalls in ms ≈ limiter % × kernel duration (Shader Timeline `duration`). For overlap/timeline:
+| metric                        |    bf16 |  fp16 est. |   MMA SOL |
+|-------------------------------|--------:|-----------:|----------:|
+| `steel_gemm` TFLOP/s          |    1.22 |       1.52 |      4.06 |
+| GEMM SOL (weighted shape mix) |    1.39 |       1.73 |         — |
+| % of GEMM SOL                 |     88% |        88% |         — |
+| % of MMA SOL                  |     30% |        37% |      100% |
+| 10k prefill tok/s             |   996.7 |       1175 |         — |
+
+`fp16 est.` assumes casting the same weights; GEMM SOL is the FLOP-weighted best over the nine model shapes at M=1011 (fastest single shape 1.55, 248320×1024); MMA SOL is the register-resident `simdgroup_matrix<float>` peak at 28k threads, so 4.06 is a compute-only ceiling, and the fp16 gain is cheaper bf16→fp32 conversion.
+
+# 1.4 mlx_lm qwen3.5 0.8b decode
 
 ```bash
-python3 ~/.cache/xtrace-skill/scripts/trace-gpu.py llama_decode.trace
+python benchmarks/decode_trace.py > /tmp/decode.log 2>&1 &
+PID=$!
+while ! grep -q READY /tmp/decode.log; do sleep 1; done
+scripts/profile.sh --attach "$PID" --seconds 20 --kernels --out traces/timeline-baseline
 ```
 
-`trace-gpu.py` reports GPU busy, command-buffer submissions and CPU→GPU start latency. For raw gaps, export `metal-application-command-buffer-submissions` and `metal-command-buffer-completed`.
+Trace session: 32.5 tok/s (30.75 ms/token), 64 decode tokens. The paired engine A/B is a tie (§1.2).
+The trace prompt was the first 5,465 bytes of the 10k file.
+
+| kernel             | intervals % | ms/token | what it does                                        |
+|--------------------|------------:|---------:|-----------------------------------------------------|
+| `gemv`             |        97.5 |    26.41 | BF16 GEMV for decode linear layers                  |
+| ↳ `bm8`            |        49.5 |    13.41 | 8 simdgroup rows per threadgroup                    |
+| ↳ `bm4`            |        48.0 |    13.00 | 4 simdgroup rows                                    |
+| ↳ `bm1`            |         0.0 |     0.00 | 1 simdgroup row (small matrices)                    |
+| `sdpa_vector`      |         1.6 |     0.43 | single-token attention over KV cache (head dim 256) |
+| rest               |         0.7 |     0.18 | small kernels: argmax, copies, elementwise          |
+| `gated_delta_step` |         0.1 |     0.04 | one step of the gated delta rule (linear attention) |
+| `rms`              |         0.1 |     0.02 | RMSNorm                                             |
+| `sigmoid+mul`      |         0.1 |     0.02 | fused sigmoid gate × value                          |
+| host/queue gap     |           — |     3.66 | —                                                   |
+| **total**          |       100.0 |    30.75 |                                                     |
+
+| metric   | paired A/B | measured SOL |
+|----------|-----------:|-------------:|
+| tok/s    |       36.3 |         39.3 |
+| ms/token |      27.55 |        25.42 |
+| GB/s     |       54.6 |         59.2 |
+| % SOL    |        92% |         100% |
+
+Measured SOL = 1.505 GB/token ÷ 59.2 GB/s = 25.42 ms/token → 39.3 tok/s; 1.505 GB is the 0.752B-param text model at 2 bytes, and 59.2 GB/s is the measured streaming read from a 512 MB MLX buffer (87% of the 68.3 GB/s nominal), so the SOL is conservative.
+
+# 1.5 omlx qwen3.5 0.8b prefill
+
+Prefill trace uses `benchmark_prompt_10k.txt` (10000 tokens).
+
+```bash
+OMLX=/Applications/oMLX.app/Contents/MacOS/omlx-cli
+$OMLX serve --port 8005 --headless &
+for i in {1..120}; do curl -s -H 'Authorization: Bearer 1234' -o /dev/null http://127.0.0.1:8005/v1/models && break; sleep 1; done
+curl -s -H 'Authorization: Bearer 1234' -H 'Content-Type: application/json' \
+  http://127.0.0.1:8005/v1/completions \
+  --data-binary "$(jq -n --arg p "$(cat benchmark_prompt_10k.txt)" '{model:"mlx-community--Qwen3.5-0.8B-bf16",prompt:$p,max_tokens:1,temperature:0}')" \
+  | jq -r '.usage.prompt_tokens_per_second'
+```
+
+| kernel                  | intervals % | what it does                          |
+|-------------------------|------------:|---------------------------------------|
+| `steel_gemm`            |        76.3 | q/k/v/o and MLP GEMM                  |
+| ↳ `nt bm64_bn32_bk32`   |        68.1 | same GEMMs, nt 64×32 tile             |
+| ↳ `nn bm64_bn64_bk16`   |         8.2 | same GEMMs, nn 64×64 tile             |
+| gdn                     |        10.2 | GDN mixer                             |
+| `sigmoid+mul`           |         3.1 | fused gating                          |
+| rest                    |         2.6 | small kernels                         |
+| copies                  |         2.1 | layout/cast copies                    |
+| `select`                |         1.7 | attention mask/index                  |
+| `fa256`                 |         1.6 | attention                             |
+| `depthwise_conv`        |         1.0 | GDN conv                              |
+| `rms`                   |         0.9 | RMSNorm                               |
+| `gemv`                  |         0.4 | one decode token                      |
+| **total**               |       100.0 | rounded                               |
+
+Warm-to-warm, the 10k interval totals differ by 1.5%; the 12% gap only appears when mlx_lm's cold first prefill is compared with a warm oMLX sample (§1.2).
+
+Prefill is compute-bound: `steel_gemm` runs at 1.24 TFLOP/s, 89% of the 1.39 TFLOP/s bf16 GEMM SOL and 31% of the 4.06 TFLOP/s MMA peak; `steel_gemm` is 76.3% of GPU kernel time, and the rest is GDN/attention. Casting the same weights to fp16 raises `steel_gemm` to 1.55 TFLOP/s (90% of the 1.73 fp16 GEMM SOL, 38% of MMA) and the full prefill from 952.7 to ~1123 tok/s (+18%).
+
+| metric                        |    bf16 |  fp16 est. |   MMA SOL |
+|-------------------------------|--------:|-----------:|----------:|
+| `steel_gemm` TFLOP/s          |    1.24 |       1.55 |      4.06 |
+| GEMM SOL (weighted shape mix) |    1.39 |       1.73 |         — |
+| % of GEMM SOL                 |     89% |        90% |         — |
+| % of MMA SOL                  |     31% |        38% |      100% |
+| 10k prefill tok/s             |   952.7 |       1123 |         — |
+
+`fp16 est.` assumes casting the same weights; GEMM SOL is the FLOP-weighted best over the nine model shapes at M=1011 (fastest single shape 1.55, 248320×1024); MMA SOL is the register-resident `simdgroup_matrix<float>` peak at 28k threads, so 4.06 is a compute-only ceiling, and the fp16 gain is cheaper bf16→fp32 conversion.
+
+# 1.6 omlx qwen3.5 0.8b decode
+
+```bash
+OMLX=/Applications/oMLX.app/Contents/MacOS/omlx-cli
+$OMLX serve --port 8005 --headless &
+PID=$!
+curl -s --retry 120 --retry-connrefused --retry-delay 1 \
+  -H 'Authorization: Bearer 1234' -H 'Content-Type: application/json' \
+  http://127.0.0.1:8005/v1/completions \
+  --data-binary "$(jq -n --arg p "$(head -c 5465 benchmark_prompt_10k.txt)" '{model:"mlx-community--Qwen3.5-0.8B-bf16",prompt:$p,max_tokens:512,temperature:0}')" > /dev/null &
+sleep 12   # server + model load + prefill
+scripts/profile.sh --attach "$PID" --seconds 3 --kernels --out traces/omlx-decode
+```
+
+Trace session: 33.0 tok/s (30.3 ms/token). The paired engine A/B is a tie (§1.2).
+
+| kernel                    | intervals % | ms/token | what it does                          |
+|---------------------------|------------:|---------:|---------------------------------------|
+| `gemv`                    |        99.2 |    30.06 | BF16 GEMV for decode linear layers    |
+| ↳ `bm8`                   |        47.8 |    14.48 | 8 simdgroup rows per threadgroup      |
+| ↳ `bm4`                   |        48.4 |    14.67 | 4 simdgroup rows                      |
+| ↳ `bm1`                   |         3.0 |     0.91 | 1 simdgroup row (small matrices)      |
+| `omlx_qwen35_fa256_*` †   |         0.3 |     0.09 | oMLX flash attention (head dim 256)   |
+| `vn_copyfloat32float16` † |         0.2 |     0.06 | vectorized fp32→fp16 copy/cast        |
+| `rmsbfloat16`             |        0.03 |     0.01 | RMSNorm                               |
+| rest                      |         0.3 |     0.09 | small kernels: GDN, RoPE, elementwise |
+| **total**                 |       100.0 |    30.30 |                                       |
+
+† Not observed in §1.4.
+
+| metric   | paired A/B | measured SOL |
+|----------|-----------:|-------------:|
+| tok/s    |       35.5 |         39.3 |
+| ms/token |      28.17 |        25.42 |
+| GB/s     |       53.4 |         59.2 |
+| % SOL    |        90% |         100% |
+
+Measured SOL = 1.505 GB/token ÷ 59.2 GB/s = 25.42 ms/token → 39.3 tok/s; 1.505 GB is the 0.752B-param text model at 2 bytes, and 59.2 GB/s is the measured streaming read from a 512 MB MLX buffer (87% of the 68.3 GB/s nominal), so the SOL is conservative.
+
+# 1.7 analyze mlx_lm
+
+1.2 shows mlx_lm at 36.3 tok/s vs oMLX at 35.5;
+
+GEMV is 97.5% of kernel time; the table below is a nominal sensitivity (68.3 GB/s = 45.4 tok/s), while §1.4/§1.6 use the measured 59.2 GB/s roofline.
+
+| GEMV gain | GB/s | ms/token | tok/s |    e2e |
+|----------:|-----:|---------:|------:|-------:|
+|        0% | 54.6 |    27.55 |  36.3 |      — |
+|        2% | 55.6 |    27.08 |  36.9 |  +1.8% |
+|        4% | 56.6 |    26.60 |  37.6 |  +3.6% |
+|        6% | 57.6 |    26.13 |  38.3 |  +5.4% |
+|      6.9% | 58.1 |    25.92 |  38.6 |  +6.3% |
+
+```bash
+python benchmarks/gemv_chain.py --passes 10
+```
+
+| tensors | weights |   median | GB/s | note                                             |
+|--------:|--------:|---------:|-----:|--------------------------------------------------|
+|     187 | 1.50 GB | 25.85 ms | 58.2 | all 9 GEMV shapes; independent, no attention/GDN |
+
+`custom64` ties MLX (0.997, 5/10), and the chain reaches 58.2 GB/s (85% of peak); a 5% kernel win is +4.6% e2e, and the only native lever is forcing bm4 vs bm8, below 2-3% we stop.
+
+The same shapes in fp16 reach 1.73 TFLOP/s weighted (§1.3/§1.5), so 1.39 is a bf16-kernel ceiling, not the M1 limit.
+
+MegaQwen's best e2e result is +1.2% and its MLP block is ~1%, with fusion capped at 2.4%, so megakernels realistically give +1-2% (36.4-36.7 tok/s), not 39.3 — reaching that needs all non-GEMV work and the host gap to vanish.
+
+# 1.8 analyze omlx
+
+oMLX is not slower: 35.5 vs 36.3 tok/s is a 0.977 paired ratio with 5/10 wins, i.e. noise.
+
+The trace difference is GEMV 99.2% vs 97.5%, mostly bm1 at 3.0% vs 0%, plus fa256 0.3% and copy 0.2% against MLX's sdpa 1.5%.
+
+Adding kernels, porting MLX's GEMV, or tuning the current one is not justified: both use the same bm8/bm4 families at 90–92% of measured SOL, and bm1 is only 3% of time; quantize before touching these.
+
+# 1.9 analyze tinygrad
+
+tinygrad BEAM=0 is 16.8 tok/s and BEAM=4 is 25.2, against mlx_lm at 36.3.
+
+| variant         | tok/s | ms/token | GB/s | %SOL |
+|-----------------|------:|---------:|-----:|-----:|
+| tinygrad BEAM=0 |  16.8 |    59.52 | 25.3 |   43 |
+| tinygrad BEAM=4 |  25.2 |    39.68 | 37.9 |   64 |
+| mlx_lm          |  36.3 |    27.55 | 54.6 |   92 |
+| measured SOL    |  39.3 |    25.42 | 59.2 |  100 |
+
+BEAM=4 is 64% of measured SOL, so it needs +44% to match mlx_lm and +56% to reach 39.3.
+
+BEAM search already tunes its kernels, and latest commits (f5ac546, 45e6a26, bd683c4) fail decode with an LLVM IR error, so there is no newer number and no GEMV port/tune worth doing.

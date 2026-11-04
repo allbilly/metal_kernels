@@ -1,1 +1,5 @@
 .opencode/
+.DS_Store
+traces/
+*.tracetemplate
+__pycache__/
