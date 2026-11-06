@@ -203,9 +203,36 @@ If we can make GEMM faster or remove other work,
 
 ### 1.5.1 optimize omlx prefill
 
-We know from 1.2 that mlxlm prefill kernel is faster than omlx.
-Lets
-1. profile both prefill kernels to understand both
-2. understand by omlx prefill kernels are slower, what are the exact time used
-3. Draft better omlx prefill kerenls inspired by mlxlm example
-4. Test those in omlx run
+The §1.2 pair put oMLX 4.4% behind (912 vs 954), and the cause was the custom attention routes, not the GEMMs: for 8 q / 2 kv M1 layouts both `apply_sdpa256_attention_patch()` and `apply_qwen35_fa256_attention_patch()` over-chunk prefill, so gating them off measured +5.6% (10/10 pairs).
+
+| change                    | before | after |  ratio |  wins |
+|---------------------------|-------:|------:|-------:|------:|
+| gate both patches         |  939.6 | 992.8 | 1.0561 | 10/10 |
+| comment both (diagnostic) |  914.2 | 973.8 | 1.0651 |  8/10 |
+| work scale 1.0 (partial)  |  930.6 | 954.2 | 1.0269 | 10/10 |
+
+| metric               |   base |  gated |
+|----------------------|-------:|-------:|
+| attention dispatches |   3474 |    165 |
+| total dispatches     |   7643 |   5733 |
+| attention GPU ms     | 1704.6 | 1665.3 |
+
+1. 10k prefill, M1 Air 8 GB, bf16; before/after are paired medians and wins are pair counts.
+2. The per-token table from the first pass is retracted: its traces covered different chunk counts, and a matched one-chunk trace showed nn 2.755% vs 2.756% and total within 0.8%.
+3. Both routes must be gated: disabling one alone falls into the other's chunked path (+0.7% / +0.3%, 7/10 and 6/10).
+4. The gate covers `q_heads <= 8 && kv_heads <= 2 && kv_len <= 16384`: the default wins at 2k/4k/8k/10k, 16k is 2.8 GB and unreliable, and at 32k the default reaches 4.5 GB and loses the clean pair.
+5. Chunk size is 5 x 2048 (debug log), the LM head never runs during prefill, and the 6 caches are 6 KV caches.
+6. A tiled bf16 GEMM on 2048x3584x1024 reaches 0.581 TFLOP/s vs 1.640 for `mx.matmul` (0.35x), so the fix was the route, not a new GEMM.
+7. Decode is separate: 0.93x at 16 tokens, but 128 tokens is 1.004 (oMLX 7/10) with steady 28.01 vs 28.62 ms; the 5% is the first decode step (42 vs 28 ms) amortized, not a sustained deficit. Lookahead patches change tokens; only the 0.5 s burst ships (+1.34%). No sustained-throughput deficit (README_full.md §1.15).
+
+```python
+# omlx/patches/sdpa256_attention.py
+_M1_SMALL_KV_MAX = 16384
+
+def is_small_m1_layout(q_heads, kv_heads, kv_len):
+    return q_heads <= 8 and kv_heads <= 2 and kv_len <= _M1_SMALL_KV_MAX
+
+# qwen35_fa256_attention._should_route(): add
+#   and not (_m1_sdpa_enabled() and is_small_m1_layout(q_heads, kv_heads, kv_len))
+# sdpa256_attention._should_route(): return False on the same predicate.
+```

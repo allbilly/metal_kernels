@@ -39,6 +39,14 @@ Rules for agents working in this repo.
 - Do not add bare kernel-name lists; give the measured share or the relevant code instead.
 - Never drop a measured `ms`/time column or total when editing a table; keep the time next to its rate.
 
+## Debugging
+
+- Debug in three layers: observations (measured, each with its source), hypotheses (each tied to a named observation), and the test that proves or disproves it. Never present a hypothesis as a finding.
+- Every hypothesis names its deciding test, the expected result on each side, and the cost; a hypothesis with no deciding test is a guess and stays out of the docs.
+- When a test disproves or fails to support a hypothesis, retract the claim in the doc and say what killed it; do not leave it as `likely` or delete the evidence silently.
+- When a kernel has no obvious source line, trace the Python caller in the real engine process — wrap `nn.Linear.__call__` with a stack recorder or attach a debugger — and group by `(x.shape, weight.shape, caller)`; a kernel name alone does not prove the route, and identical per-token op inventories mean the difference is kernel selection or measurement.
+- Set-diff kernel names from paired traces (`scripts/kernels.py traces/A --csv --all | cut -d, -f1 | sort -u`, then `comm -23 omlx mlx`) and map every oMLX-only name to its JIT/source and route gate before counting it as decode cost; prefill kernels (`fa256`, `gdn_prework`) leak into short windows and inflate per-token rates.
+
 ## Verify before claiming
 
 - Confirm facts with commands (`sw_vers`, `sysctl`, `--version`) instead of guessing.
